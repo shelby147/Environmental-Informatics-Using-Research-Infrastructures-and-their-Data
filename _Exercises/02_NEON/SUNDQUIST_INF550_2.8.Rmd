@@ -1,0 +1,95 @@
+---
+title: "SUNDQUIST_INF550_2.8"
+author: "Shelby Sundquist"
+date: '2022-09-12'
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r}
+options(stringsAsFactors = F)
+library(neonUtilities)
+library(geoNEON)
+library(sp)
+library(ggplot2)
+library(dplyr)
+source('neon_token_source.R')
+```
+## Section 2.8
+```{r}
+veglist <- loadByProduct(dpID="DP1.10098.001", site="WREF", package="basic", check.size=FALSE, token = NEON_TOKEN)
+vegmap <- getLocTOS(veglist$vst_mappingandtagging, 
+                          "vst_mappingandtagging")
+```
+
+```{r}
+veg <- merge(veglist$vst_apparentindividual, vegmap, 
+             by=c("individualID","namedLocation",
+                  "domainID","siteID","plotID"))
+```
+
+```{r}
+symbols(veg$adjEasting[which(veg$plotID=="WREF_075")], 
+        veg$adjNorthing[which(veg$plotID=="WREF_075")], 
+        circles=veg$stemDiameter[which(veg$plotID=="WREF_075")]/100/2, 
+        inches=F, xlab="Easting", ylab="Northing")
+
+symbols(veg$adjEasting[which(veg$plotID=="WREF_075")], 
+        veg$adjNorthing[which(veg$plotID=="WREF_075")], 
+        circles=veg$stemDiameter[which(veg$plotID=="WREF_075")]/100/2, 
+        inches=F, xlab="Easting", ylab="Northing")
+symbols(veg$adjEasting[which(veg$plotID=="WREF_075")], 
+        veg$adjNorthing[which(veg$plotID=="WREF_075")], 
+        circles=veg$adjCoordinateUncertainty[which(veg$plotID=="WREF_075")], 
+        inches=F, add=T, fg="lightblue")
+```
+
+## Section 2.9
+```{r}
+#1 - 2
+ggplot(subset(veg, plotID == "WREF_075"), aes(x = adjEasting, y = adjNorthing, color = taxonID, size = stemDiameter)) +
+  geom_point() + ylab("Northing") + xlab("Easting")
+```
+```{r}
+#3
+ggplot(subset(veg, !is.na(height)), aes(height, fill = taxonID)) + geom_histogram()
+```
+
+```{r}
+#4 - 6
+live = veg %>% filter(!plantStatus %in% c("Standing dead","Dead, broken bole","Downed"))
+live$taxonID = as.factor(live$taxonID)
+live = live[!is.na(live$height),]
+live = live[!is.na(live$stemDiameter),]
+model = lm(height ~ stemDiameter, data = live)
+
+fit = live %>% select(-matches("fit"), -matches("lwr"), -matches("upr")) %>% 
+cbind(predict(model, newdata = ., interval = 'confidence'))
+
+ggplot(fit, aes(x = stemDiameter, y = height, color = taxonID)) + geom_point() + geom_line(aes(y = fit)) +
+  geom_ribbon(aes(ymin = lwr, ymax = upr, alpha = 0.2, fill = taxonID))
+```
+```{r}
+#7
+#Linear model assessment: it's not great, mostly because the data doesn't appear linear.
+#Height increases more slowly for trees with large DBH.
+#Also, the confidence interval hardly appears to encompass the data, indicating that there are factors the model isn't 
+#adequately considering 
+
+#Number of unique species:
+length(unique(veg$taxonID))
+
+#Tallest/ greatest diameter trees:
+veg[order(veg$height),]$individualID[1:5]
+veg[order(veg$stemDiameter),]$individualID[1:5]
+
+#What proportion of sampled trees are dead?
+veg %>% group_by(plantStatus) %>% count() %>% mutate(proportion = n/nrow(veg))
+#Between 13-14% of trees sampled were dead 
+```
+
