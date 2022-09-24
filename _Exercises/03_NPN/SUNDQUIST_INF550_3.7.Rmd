@@ -1,0 +1,214 @@
+---
+title: "SUNDQUIST_INF550_3.7"
+author: "Shelby Sundquist"
+date: '2022-09-21'
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+always_allow_html = TRUE
+
+```
+
+```{r}
+library(rnpn)
+library(ggplot2)
+library(neonUtilities)
+library(dplyr)
+library(lubridate)
+library(mgcv)
+library(plotly)
+source('neon_token_source.R')
+```
+
+#1. 
+```{r}
+sitesOfInterest <- c("HARV","CPER")
+```
+#2.
+$\sum_{0}^{doy}(\frac{T_{doy, max}-T_{doy, min}}{2}-T_{base})$
+
+#3. 
+```{r}
+
+dpid <- as.character('DP1.10055.001') #phe data
+ 
+pheDat <- loadByProduct(dpID="DP1.10055.001",
+                     site = sitesOfInterest,
+                    startdate = "2017-01",
+                    enddate="2017-12",
+                     package = "basic",
+                     check.size = FALSE, 
+                     token=NEON_TOKEN)
+
+#NEON sends the data as a nested list, so I need to undo that
+# unlist all data frames
+list2env(pheDat ,.GlobalEnv)
+summary(phe_perindividualperyear)
+summary(phe_statusintensity)
+
+#remove duplicate records
+phe_statusintensity <- select(phe_statusintensity, -uid)
+phe_statusintensity <- distinct(phe_statusintensity)
+phe_statusintensity$date <- as.Date(phe_statusintensity$date, "%Y-%m-%d")
+phe_statusintensity$editedDate <- as.Date(phe_statusintensity$editedDate, "%Y-%m-%d")
+phe_statusintensity$year <- as.numeric(substr(phe_statusintensity$date, 1, 4))
+phe_statusintensity$month <- as.numeric(format(phe_statusintensity$date, format="%m"))
+unique(phe_statusintensity$phenophaseName)
+summary(as.factor(phe_perindividual$taxonID))
+
+```
+```{r}
+#Selecting my species/ phenophase
+filtered = merge(phe_statusintensity, phe_perindividual[,c("taxonID","individualID")], by = c("individualID"))
+filtered = subset(filtered, phenophaseName == "Open flowers" & phenophaseStatus == "yes" & taxonID == "ACRU" & phenophaseIntensity == ">= 95%")
+#filtered = na.omit(filtered)
+filtered$doy2 = yday(filtered$date)
+filtered$phenophaseName = as.factor(filtered$phenophaseName); filtered$phenophaseStatus = as.factor(filtered$phenophaseStatus)
+filtered$phenophaseIntensity = as.factor(filtered$phenophaseIntensity); filtered$namedLocation = as.factor(filtered$namedLocation)
+summary(filtered$doy)
+#Plotting data 
+hist(filtered$doy, 30) 
+#Counting data
+summary(as.factor(filtered$doy))
+```
+#4. 
+```{r}
+dpid <- as.character('DP1.00002.001') #air temp data
+tempDat <- loadByProduct(dpID=dpid,
+                        site = sitesOfInterest,
+                        startdate = "2017-01",
+                        enddate="2017-12",
+                        avg=30,
+                        package = "basic",
+                        check.size = FALSE,
+                      token=NEON_TOKEN)
+```
+#5
+```{r}
+df = tempDat$SAAT_30min
+df$meanTempF=df$tempSingleMean*1.8+32
+df$date <- substr(df$endDateTime, 1, 10)
+select(tempDat$sensor_positions_00002, c(HOR.VER, zOffset))
+head(tempDat$sensor_positions_00002)
+
+day_temp <- df%>%
+  filter(verticalPosition=="030")%>%
+  group_by(siteID, date)%>%
+  mutate(dayMaxTemp=max(meanTempF), dayMinTemp=min(meanTempF),
+         dayMeanTemp=mean(meanTempF))%>%
+  select(siteID, date, dayMaxTemp, dayMinTemp, dayMeanTemp)%>%
+  distinct()
+day_temp$mean2 <- (day_temp$dayMinTemp + day_temp$dayMaxTemp)/2
+
+day_temp$GDD1 <- ifelse(day_temp$dayMeanTemp-50 < 0, 0, round(day_temp$dayMeanTemp-50, 0))
+day_temp$GDD2 <- ifelse(day_temp$mean2-50 < 0, 0, round(day_temp$mean2-50, 0))
+day_temp$GDD3 <- ifelse(day_temp$dayMeanTemp-50 < 0, 0, round(day_temp$mean2-50, 0))
+# define year
+day_temp$year <- substr(day_temp$date, 1, 4)
+
+#function to add daily GDD values
+sumr.2 <- function(x) {
+	sapply(1:length(x), function(i) sum(x[1:i]))
+}
+day_temp = na.omit(day_temp)
+#calculate Accumlated GDD
+day_temp$AGDD3 <- sumr.2(x=day_temp$GDD3)
+day_temp$AGDD2 <- sumr.2(x=day_temp$GDD2)
+day_temp$AGDD1 <- sumr.2(x=day_temp$GDD1)
+day_temp <- ungroup(day_temp)
+
+
+
+p = plot_ly() %>%
+    add_trace(
+      x= ~day_temp$date,
+      y = ~ day_temp$AGDD1,
+      type= 'scatter',
+      mode = "lines",
+      line = list(width = 1, color = "rgb(120,120,120)"),
+      name = "Calculated Mean Temp",
+      showlegend = TRUE, 
+      opacity=.5
+    )%>%
+  add_trace(
+      data = day_temp,
+    x = ~ date,
+    y = ~ AGDD2,
+    name= 'Simplified Mean Temp',
+    showlegend = TRUE,
+    type = 'scatter',
+    mode = 'lines',
+    line = list(width = 1),
+    opacity=.5)%>%
+  add_trace(
+      data = day_temp,
+    x = ~ date,
+    y = ~ AGDD3,
+    name= 'Filtered Using Both',
+    showlegend = TRUE,
+    type = 'scatter',
+    mode = 'lines',
+    line = list(width = 1),
+    opacity=.2)
+p
+#This plot/ the data are not very useful because there are lots of missing weather observations, especially during March and April which are important times for determining spring phenological phases
+
+```
+#6
+```{r}
+phe = merge(phe_statusintensity, phe_perindividual[,c("taxonID","individualID")], by = c("individualID"))
+phe = subset(phe, phenophaseName == "Colored leaves" & taxonID == "QURU")
+phe = phe[phe$year == 2017,]
+day_temp$date <- as.Date(day_temp$date, "%Y-%m-%d")
+dat = merge(day_temp, phe, by = c("siteID","date"))
+dat$doy = yday(dat$date)
+dat$phenophaseStatus = as.factor(dat$phenophaseStatus)
+model <- mgcv::gam(phenophaseStatus ~ AGDD1 + s(dayMeanTemp) + s(doy), data=dat, family = binomial)
+mgcv::summary.gam(model) 
+mgcv::plot.gam(model, pages=1 )
+
+```
+
+#7-10 use more data 
+```{r}
+phenophases <- "Colored leaves"
+
+phedat2 <- npn_download_status_data(request_source='NAU', years=c(2017),  species_ids = 3)
+phedat2 = subset(phedat2, phenophase_status == 1 & state == "MA") #ugh there's norhting left!!
+
+
+phedat2 <- npn_download_status_data(request_source='NAU', years=c(2017),  state = "MA")
+phedat2 = subset(phedat2, phenophase_status == 1 & kingdom == "Plantae" & species == "rubrum") 
+summary(as.factor(phedat2$phenophase_description))
+
+
+dat = merge(phe_statusintensity, phe_perindividual[,c("taxonID","individualID")], by = c("individualID"))
+dat = subset(dat, phenophaseName == "Colored leaves" & taxonID == "QURU" & siteID == "HARV")
+dat = dat[dat$year == 2017,]
+dat = dat %>% select(date, phenophaseStatus)
+dat2 = phedat2 %>% select(observation_date, phenophase_status)
+colnames(dat2) = c("date","phenophaseStatus")
+dat$phenophaseStatus = as.character(dat$phenophaseStatus); dat$date = as.character(dat$date)
+dat[dat == "yes"] <- 1; dat[dat == "no"] <- 0
+dat$date = as.Date(dat$date)
+
+dat = rbind(dat, dat2)
+dat = merge(day_temp, dat, by = c("date"))
+dat$doy = yday(dat$date)
+dat$phenophaseStatus = as.factor(dat$phenophaseStatus)
+
+
+model <- mgcv::gam(phenophaseStatus ~ AGDD1 + s(dayMeanTemp) + s(doy), data=dat, family = binomial)
+mgcv::summary.gam(model) 
+mgcv::plot.gam(model, pages=1 )
+
+
+
+
+```
+
+
+#The model is worse now. Probably because the weather data is from harvard forest and I pulled phenology observations from all of MA. 
+

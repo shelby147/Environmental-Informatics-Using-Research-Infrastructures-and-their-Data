@@ -1,0 +1,24 @@
+---
+title: "SUNDQUIST_INF550_3.7"
+author: "Shelby Sundquist"
+date: '2022-09-21'
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(rnpn)
+library(ggplot2)
+library(neonUtilities)
+library(dplyr)
+source('neon_token_source.R')
+```
+
+dark data = data that's collected but in a private repository/ unpublished
+neon deals with it by getting rid of it - publishing all their data
+
+
+
